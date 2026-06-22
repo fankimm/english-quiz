@@ -225,6 +225,11 @@ function renderResult(note){
 function gradeScope(idxs,label){
   const filled=idxs.filter(i=>(store[i]||'').trim());
   if(!filled.length){ alert(`${label}에 작성한 답이 없어요.`); return; }
+  // 마침표 자동: 문장부호로 안 끝나면 . 추가 (입력칸·저장소 반영)
+  filled.forEach(i=>{ let v=(store[i]||'').trim();
+    if(v && !/[.?!…]$/.test(v)){ v+='.'; store[i]=v;
+      const inp=list.querySelector(`input[data-idx="${i}"]`); if(inp) inp.value=v; } });
+  saveStore();
   filled.forEach(i=>{ const g=gradeOne(i); grades[i]={mark:g.mark, ans:SENTENCES[i].en, userGraded:g.user, diff:g.diff}; });
   saveGrades(); renderResult(); res.scrollIntoView({behavior:'smooth',block:'start'});
 }

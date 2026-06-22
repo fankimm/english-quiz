@@ -9,7 +9,7 @@
 실행:  python3 quiz_server.py        (기본 포트 4321)
         python3 quiz_server.py 4400   (포트 지정)
 """
-import json, os, sys, shutil, subprocess, tempfile
+import json, os, re, sys, shutil, subprocess, tempfile, unicodedata
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -75,15 +75,59 @@ def _grade_one(r):
     return {"idx": r["idx"], "mark": mark, "block": block}
 
 
+# ===== 논클로드(정규화) 선채점: 틀린 것만 Claude로 보내 속도 향상 =====
+_CONTRACTIONS = {"gonna": "going to", "kinda": "kind of", "wanna": "want to",
+                 "gotta": "got to", "lemme": "let me", "gimme": "give me", "dunno": "dont know"}
+
+
+def _normalize(s):
+    t = unicodedata.normalize("NFC", s.lower())
+    t = t.replace("‘", "'").replace("’", "'").replace("“", '"').replace("”", '"')
+    t = re.sub(r"[–—]", " ", t)
+    t = re.sub(r"[a-z]+", lambda m: _CONTRACTIONS.get(m.group(0), m.group(0)), t)
+    t = t.replace("'", "").replace('"', "")
+    t = re.sub(r"[.,!?;:()\-]", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _similarity(a, b):
+    m, n = len(a), len(b)
+    if m == 0 and n == 0:
+        return 1.0
+    dp = list(range(n + 1))
+    for i in range(1, m + 1):
+        prev, dp[0] = dp[0], i
+        for j in range(1, n + 1):
+            cur = dp[j]
+            dp[j] = prev if a[i - 1] == b[j - 1] else 1 + min(dp[j], dp[j - 1], prev)
+            prev = cur
+    return 1 - dp[n] / max(m, n)
+
+
+def _local_mark(user, ans):
+    nu, na = _normalize(user), _normalize(ans)
+    if nu == na:
+        return "⭕"
+    return "🔺" if _similarity(nu.split(), na.split()) >= 0.7 else "❌"
+
+
 def run_grading(rows):
-    """rows 중 user가 채워진 것만 문항별 병렬 채점 → [{idx, mark, block}] 반환."""
+    """먼저 정규화로 선채점 → ⭕는 즉시 확정, 🔺/❌만 Claude가 검토."""
     from concurrent.futures import ThreadPoolExecutor
     filled = [r for r in rows if r["user"].strip()]
     if not filled:
         return []
     filled.sort(key=lambda r: r["idx"])
-    with ThreadPoolExecutor(max_workers=min(12, len(filled))) as ex:
-        return list(ex.map(_grade_one, filled))
+    ok = [r for r in filled if _local_mark(r["user"], r["answer_key"]) == "⭕"]
+    wrong = [r for r in filled if _local_mark(r["user"], r["answer_key"]) != "⭕"]
+    items = [{"idx": r["idx"], "mark": "⭕",
+              "block": f'문항 {r["idx"]+1}  ⭕\n  내 답: {r["user"]}\n  모범답안: {r["answer_key"]}'}
+             for r in ok]
+    if wrong:  # 틀린 것만 Claude 검토 (⭕로 올려줄 수도 있음)
+        with ThreadPoolExecutor(max_workers=min(12, len(wrong))) as ex:
+            items.extend(ex.map(_grade_one, wrong))
+    items.sort(key=lambda x: x["idx"])
+    return items
 
 DATA = [
     {"en": "I'm kind of swamped right now.", "ko": "나 지금 일이 좀 밀려서 정신없어."},
@@ -310,8 +354,13 @@ function renderResult(note){
 }
 
 async function gradeScope(candidateIdxs, label){
-  const filled = candidateIdxs.filter(i=>(store[i]||'').trim());
+  let filled = candidateIdxs.filter(i=>(store[i]||'').trim());
   if(!filled.length){ alert(`${label}에 작성한 답이 없어요.`); return; }
+  // 마침표 자동: 문장부호로 안 끝나면 . 추가 (입력칸·저장소 반영)
+  filled.forEach(i=>{ let v=(store[i]||'').trim();
+    if(v && !/[.?!…]$/.test(v)){ v+='.'; store[i]=v;
+      const inp=document.querySelector(`#list input[data-idx="${i}"]`); if(inp) inp.value=v; } });
+  saveStore();
   // 캐시 없거나 답이 바뀐 문항만 실제 채점
   const need = filled.filter(i=> !grades[i] || grades[i].ans !== store[i]);
   const cached = filled.length - need.length;
