@@ -160,6 +160,11 @@ DATA = [
     {"en": "I can't wrap my head around it.", "ko": "도무지 이해가 안 돼."},
     {"en": "Let's keep in touch.", "ko": "계속 연락하고 지내자."},
     {"en": "You took the words right out of my mouth.", "ko": "내가 하려던 말이 딱 그거야."},
+    {"en": "It's a long story.", "ko": "얘기하자면 길어."},
+    {"en": "No worries, it happens.", "ko": "괜찮아, 그럴 수 있지."},
+    {"en": "Let's grab a coffee sometime.", "ko": "언제 커피 한잔하자."},
+    {"en": "That's news to me.", "ko": "그거 처음 듣는 얘긴데."},
+    {"en": "I'll let it slide this time.", "ko": "이번엔 그냥 넘어가 줄게."},
 ]
 
 NUM_DAYS = (len(DATA) + DAY_SIZE - 1) // DAY_SIZE
